@@ -37,8 +37,22 @@ let isFirstRound = true;
 
 // ===== Web Audio =====
 let audioCtx = null;
+let audioWarmedUp = false;
+
+/** 初回タップ時にiOSのオーディオハードウェアを起動する（遅延防止） */
+function warmupAudio() {
+  if (audioWarmedUp) return;
+  audioWarmedUp = true;
+  const ac = getAudio();
+  const buf = ac.createBuffer(1, 1, ac.sampleRate);
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  src.connect(ac.destination);
+  src.start(0);
+}
 function getAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
 
@@ -58,14 +72,14 @@ function playTone(freq, type, duration, startTime, gain = 0.4) {
 
 function playPop() {
   const ac = getAudio();
-  const now = ac.currentTime;
+  const now = ac.currentTime + 0.05;
   playTone(880,  'sine', 0.12, now,        0.5);
   playTone(1200, 'sine', 0.10, now + 0.05, 0.4);
 }
 
 function playFanfare() {
   const ac  = getAudio();
-  const now = ac.currentTime;
+  const now = ac.currentTime + 0.05;
   const notes = [523, 587, 659, 698, 784];
   notes.forEach((f, i) => {
     playTone(f, 'triangle', 0.25, now + i * 0.12, 0.45);
@@ -77,14 +91,14 @@ function playFanfare() {
 
 function playRollTick() {
   const ac  = getAudio();
-  const now = ac.currentTime;
+  const now = ac.currentTime + 0.05;
   playTone(220, 'sine', 0.08, now, 0.15);
 }
 
 /** 拍手SE: 2層クラップ（スナップ+ボディ） + ハイパス＋ピーキングEQ */
 function playApplause() {
   const ac  = getAudio();
-  const now = ac.currentTime;
+  const now = ac.currentTime + 0.05;
   const dur = 2.8;
 
   const rate   = ac.sampleRate;
@@ -140,7 +154,7 @@ function playApplause() {
 /** 歓声SE: ホワイトノイズ + スイープするバンドパスで「ワアアア！」を合成 */
 function playCheering() {
   const ac  = getAudio();
-  const now = ac.currentTime;
+  const now = ac.currentTime + 0.05;
   const dur = 2.5;
 
   // ベースノイズバッファ（共有）
@@ -430,13 +444,13 @@ function catchBall(x, y) {
   ball.className = 'caught';
   doFlash();
   spawnRipple(x, y, 'rgba(255,220,0,0.7)');
-  playApplause();
-  playCheering();
+  playFanfare();
+  launchConfetti();
+  showClearText();
   setTimeout(() => {
-    playFanfare();
-    launchConfetti();
-    showClearText();
-  }, 200);
+    playApplause();
+    playCheering();
+  }, 500);
 
   setTimeout(() => {
     hideClearText();
@@ -481,6 +495,7 @@ function onTap(clientX, clientY) {
 // タッチイベント
 gameEl.addEventListener('touchstart', e => {
   e.preventDefault();
+  warmupAudio();
   const t = e.changedTouches[0];
   onTap(t.clientX, t.clientY);
 }, { passive: false });
