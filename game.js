@@ -34,6 +34,7 @@ let autoTimer    = null;
 let confettiArr  = [];
 let confettiRaf  = null;
 let isFirstRound = true;
+let tapBlocked   = false; // 出現直後1秒間のタップ無効フラグ
 
 // ===== Web Audio =====
 let audioCtx = null;
@@ -356,18 +357,15 @@ function hideBall() {
 // ===== HIDE フェーズ開始 =====
 function startHide() {
   state = STATE.HIDE;
+  tapBlocked = false;
   clearTimeout(autoTimer);
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
   hideBall();
   grassCanvas.classList.add('wiggling');
 
-  if (isFirstRound) {
-    hintText.textContent = 'どこかに隠れているよ！';
-    hintText.classList.remove('hidden');
-  } else {
-    hintText.classList.add('hidden');
-  }
+  hintText.textContent = 'どこかにかくれているよ！';
+  hintText.classList.remove('hidden');
 
   // 自動出現タイマーなし（子供が自分で見つけるまで待つ）
 }
@@ -398,15 +396,24 @@ function startRun() {
   state = STATE.RUN;
   ball.className = 'running';
 
+  // 出現直後1秒間: 3倍速で遠くへ逃げ、タップを受け付けない
+  tapBlocked = true;
   const angle = rand(0, Math.PI * 2);
-  velX = Math.cos(angle) * BALL_SPEED;
-  velY = Math.sin(angle) * BALL_SPEED;
+  velX = Math.cos(angle) * BALL_SPEED * 3;
+  velY = Math.sin(angle) * BALL_SPEED * 3;
+
+  setTimeout(() => {
+    if (state === STATE.RUN) {
+      tapBlocked = false;
+      // 速度を通常に戻す（向きは維持）
+      const spd = Math.sqrt(velX * velX + velY * velY);
+      if (spd > 0) { velX = (velX / spd) * BALL_SPEED; velY = (velY / spd) * BALL_SPEED; }
+    }
+  }, 1000);
 
   rollTickInterval = setInterval(() => {
     if (state === STATE.RUN) playRollTick();
   }, 400);
-
-  // 自動捕獲タイマーなし（子供が自分で捕まえるまで待つ）
 
   rafId = requestAnimationFrame(runLoop);
 }
@@ -478,6 +485,7 @@ function onTap(clientX, clientY) {
   }
 
   if (state === STATE.RUN) {
+    if (tapBlocked) return; // 出現直後1秒間はタップ無効
     const dx   = clientX - ballX;
     const dy   = clientY - ballY;
     const dist = Math.sqrt(dx * dx + dy * dy);
