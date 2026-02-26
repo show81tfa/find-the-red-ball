@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>赤いボールをつかまえよう！</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game">
+    <!-- 空のキャンバス背景 -->
+    <div id="sky"></div>
+    <div id="ground"></div>
+
+    <!-- ボール -->
+    <div id="ball"></div>
+
+    <!-- 草むら（ボールの上に重なってz-indexで隠す） -->
+    <div id="grass-container">
+      <svg id="grass-svg" viewBox="0 0 800 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+        <path id="grass-path" d="
+          M0,120
+          L0,80
+          Q20,20 40,70
+          Q60,10 80,65
+          Q100,5  120,60
+          Q140,15 160,55
+          Q180,0  200,50
+          Q220,20 240,60
+          Q260,5  280,55
+          Q300,15 320,50
+          Q340,0  360,55
+          Q380,20 400,60
+          Q420,5  440,55
+          Q460,15 480,50
+          Q500,0  520,55
+          Q540,20 560,60
+          Q580,5  600,55
+          Q620,15 640,50
+          Q660,0  680,55
+          Q700,20 720,60
+          Q740,5  760,55
+          Q780,15 800,50
+          L800,120 Z
+        " fill="#4caf50"/>
+        <!-- 草の前景（より明るい緑） -->
+        <path d="
+          M0,120
+          L0,90
+          Q15,50 30,80
+          Q45,40 60,75
+          Q75,55 90,85
+          Q105,45 120,78
+          Q135,35 150,72
+          Q165,50 180,82
+          Q195,40 210,76
+          Q225,30 240,70
+          Q255,50 270,80
+          Q285,35 300,72
+          Q315,45 330,78
+          Q345,30 360,70
+          Q375,50 390,80
+          Q405,35 420,72
+          Q435,45 450,78
+          Q465,30 480,70
+          Q495,50 510,80
+          Q525,35 540,72
+          Q555,45 570,78
+          Q585,30 600,70
+          Q615,50 630,80
+          Q645,35 660,72
+          Q675,45 690,78
+          Q705,30 720,70
+          Q735,50 750,80
+          Q765,35 780,72
+          Q790,45 800,78
+          L800,120 Z
+        " fill="#66bb6a" opacity="0.8"/>
+      </svg>
+    </div>
+
+    <!-- クリア演出オーバーレイ -->
+    <div id="flash-overlay"></div>
+    <canvas id="confetti-canvas"></canvas>
+
+    <!-- ヒントテキスト（最初だけ表示） -->
+    <div id="hint-text">草むらをタップしてみよう！</div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
