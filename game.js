@@ -256,9 +256,7 @@ function startHide() {
     hintText.classList.add('hidden');
   }
 
-  autoTimer = setTimeout(() => {
-    if (state === STATE.HIDE) startAppear();
-  }, HIDE_TIMEOUT);
+  // 自動出現タイマーなし（子供が自分で見つけるまで待つ）
 }
 
 // ===== APPEAR フェーズ =====
@@ -295,9 +293,7 @@ function startRun() {
     if (state === STATE.RUN) playRollTick();
   }, 400);
 
-  autoTimer = setTimeout(() => {
-    if (state === STATE.RUN) catchBall(ballX, ballY);
-  }, RUN_TIMEOUT);
+  // 自動捕獲タイマーなし（子供が自分で捕まえるまで待つ）
 
   rafId = requestAnimationFrame(runLoop);
 }
@@ -353,10 +349,15 @@ function onTap(clientX, clientY) {
   if (state === STATE.CATCH || state === STATE.APPEAR) return;
 
   if (state === STATE.HIDE) {
-    // 草原エリア（空の下）ならどこでもタップ有効
+    // RUNフェーズと同じ距離判定でボールの隠れ位置付近のみ反応
     if (clientY >= skyHeight()) {
-      spawnRipple(clientX, clientY, 'rgba(100,200,100,0.5)');
-      startAppear();
+      const dx   = clientX - ballX;
+      const dy   = clientY - ballY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= BALL_RADIUS * 1.4) {
+        spawnRipple(clientX, clientY, 'rgba(100,200,100,0.5)');
+        startAppear();
+      }
     }
     return;
   }
