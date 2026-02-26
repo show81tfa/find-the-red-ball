@@ -8,7 +8,7 @@
 
 // ===== DOM 参照 =====
 const ball        = document.getElementById('ball');
-const grassCont   = document.getElementById('grass-container');
+const grassCanvas = document.getElementById('grass-canvas');
 const flashOv     = document.getElementById('flash-overlay');
 const confettiCvs = document.getElementById('confetti-canvas');
 const hintText    = document.getElementById('hint-text');
@@ -43,12 +43,12 @@ function getAudio() {
 }
 
 function playTone(freq, type, duration, startTime, gain = 0.4) {
-  const ac   = getAudio();
-  const osc  = ac.createOscillator();
+  const ac    = getAudio();
+  const osc   = ac.createOscillator();
   const gainN = ac.createGain();
   osc.connect(gainN);
   gainN.connect(ac.destination);
-  osc.type      = type;
+  osc.type = type;
   osc.frequency.setValueAtTime(freq, startTime);
   gainN.gain.setValueAtTime(gain, startTime);
   gainN.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
@@ -66,12 +66,10 @@ function playPop() {
 function playFanfare() {
   const ac  = getAudio();
   const now = ac.currentTime;
-  // ドレミファソ 上昇
   const notes = [523, 587, 659, 698, 784];
   notes.forEach((f, i) => {
     playTone(f, 'triangle', 0.25, now + i * 0.12, 0.45);
   });
-  // 最後に和音
   [523, 659, 784].forEach(f => {
     playTone(f, 'triangle', 0.5, now + notes.length * 0.12, 0.35);
   });
@@ -86,8 +84,6 @@ function playRollTick() {
 // ===== ユーティリティ =====
 function rand(min, max) { return Math.random() * (max - min) + min; }
 
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
 /** ボール位置を DOM に反映 */
 function moveBallTo(x, y) {
   ballX = x;
@@ -96,15 +92,53 @@ function moveBallTo(x, y) {
   ball.style.top  = y + 'px';
 }
 
-/** 草むら上端のY座標（画面高の約78%） */
-function grassTopY() {
-  return window.innerHeight * 0.78;
+/** 空エリアの高さ（画面の上部15%） */
+function skyHeight() {
+  return window.innerHeight * 0.15;
 }
 
-/** 画面サイズに合わせてcanvasをリサイズ */
+/** confetti キャンバスのリサイズ */
 function resizeCanvas() {
   confettiCvs.width  = window.innerWidth;
   confettiCvs.height = window.innerHeight;
+}
+
+// ===== 草むら前景を Canvas に描画 =====
+function drawGrass() {
+  const sky = skyHeight();
+  const w   = window.innerWidth;
+  const gh  = window.innerHeight - sky;  // 草原の高さ
+
+  grassCanvas.width  = w;
+  grassCanvas.height = gh;
+
+  const gc = grassCanvas.getContext('2d');
+  gc.clearRect(0, 0, w, gh);
+
+  // 草の穂を横方向に密に並べながら、縦方向にもランダムに散りばめる
+  // rowBaseY: キャンバス内のy座標（grassCanvasの上端=0がskyHeightに対応）
+  for (let rowBaseY = gh + 10; rowBaseY >= -20; rowBaseY -= 40) {
+    const numBladesInRow = Math.ceil(w / 6);
+    for (let i = 0; i < numBladesInRow; i++) {
+      const bx     = rand(-5, w + 5);
+      const bladeH = rand(45, 110);
+      const bend   = rand(-28, 28);
+      const thick  = rand(2, 5);
+      const hue    = rand(90, 135);
+      const light  = rand(12, 38);
+
+      gc.strokeStyle = `hsl(${hue}, 60%, ${light}%)`;
+      gc.lineWidth   = thick;
+      gc.lineCap     = 'round';
+      gc.beginPath();
+      gc.moveTo(bx, rowBaseY);
+      gc.quadraticCurveTo(
+        bx + bend * 0.45, rowBaseY - bladeH * 0.55,
+        bx + bend,        rowBaseY - bladeH
+      );
+      gc.stroke();
+    }
+  }
 }
 
 // ===== クリアテキスト =====
@@ -189,17 +223,20 @@ function spawnRipple(x, y, color = 'rgba(255,200,50,0.6)') {
 // ===== フラッシュ =====
 function doFlash() {
   flashOv.className = '';
-  void flashOv.offsetWidth; // reflow
+  void flashOv.offsetWidth;
   flashOv.className = 'flash';
 }
 
-// ===== ボールのランダム出発位置（草むらエリア内） =====
-function hideBallInGrass() {
-  const gY  = grassTopY();
-  const x   = rand(window.innerWidth * 0.2, window.innerWidth * 0.8);
-  const y   = gY + rand(10, 30); // 草むらの少し下（草に隠れる）
+// ===== HIDEフェーズ: 草原内のランダムな位置にボールを隠す =====
+function hideBall() {
+  const sky = skyHeight();
+  const w   = window.innerWidth;
+  const h   = window.innerHeight;
+  const x   = rand(BALL_RADIUS + 10, w - BALL_RADIUS - 10);
+  const y   = rand(sky + BALL_RADIUS + 10, h - BALL_RADIUS - 10);
+
   moveBallTo(x, y);
-  ball.style.zIndex = '5'; // 草むらより後ろ
+  ball.style.zIndex = '5'; // 草むら前景（z-index:20）の後ろ
   ball.className    = '';
 }
 
@@ -209,18 +246,16 @@ function startHide() {
   clearTimeout(autoTimer);
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
-  hideBallInGrass();
-  grassCont.classList.add('wiggling');
+  hideBall();
+  grassCanvas.classList.add('wiggling');
 
-  // ヒントテキスト
   if (isFirstRound) {
-    hintText.textContent = '草むらをタップしてみよう！';
+    hintText.textContent = 'どこかに隠れているよ！';
     hintText.classList.remove('hidden');
   } else {
     hintText.classList.add('hidden');
   }
 
-  // 5秒後に自動でAPPEARへ
   autoTimer = setTimeout(() => {
     if (state === STATE.HIDE) startAppear();
   }, HIDE_TIMEOUT);
@@ -232,17 +267,15 @@ function startAppear() {
   clearTimeout(autoTimer);
   isFirstRound = false;
 
-  grassCont.classList.remove('wiggling');
-  grassCont.classList.add('opening');
+  grassCanvas.classList.remove('wiggling');
   hintText.classList.add('hidden');
 
-  // ボールを草むら前面に
+  // ボールを草むら前景の前面へ
   ball.style.zIndex = '25';
   ball.className    = 'popping';
   playPop();
 
   setTimeout(() => {
-    grassCont.classList.remove('opening');
     startRun();
   }, 500);
 }
@@ -254,17 +287,14 @@ function startRun() {
   state = STATE.RUN;
   ball.className = 'running';
 
-  // ランダムな方向に逃げ始める
   const angle = rand(0, Math.PI * 2);
   velX = Math.cos(angle) * BALL_SPEED;
   velY = Math.sin(angle) * BALL_SPEED;
 
-  // 効果音のチクタク
   rollTickInterval = setInterval(() => {
     if (state === STATE.RUN) playRollTick();
   }, 400);
 
-  // 10秒後に自動で捕獲
   autoTimer = setTimeout(() => {
     if (state === STATE.RUN) catchBall(ballX, ballY);
   }, RUN_TIMEOUT);
@@ -275,19 +305,19 @@ function startRun() {
 function runLoop() {
   if (state !== STATE.RUN) return;
 
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  const margin = BALL_RADIUS;
-  const gTop   = grassTopY() - BALL_RADIUS;
+  const w    = window.innerWidth;
+  const h    = window.innerHeight;
+  const minY = skyHeight() + BALL_RADIUS; // 空との境界が上限
+  const maxY = h - BALL_RADIUS;           // 画面下端が下限
 
   let nx = ballX + velX;
   let ny = ballY + velY;
 
   // 壁跳ね返り
-  if (nx < margin)     { nx = margin;     velX = Math.abs(velX); }
-  if (nx > w - margin) { nx = w - margin; velX = -Math.abs(velX); }
-  if (ny < margin)     { ny = margin;     velY = Math.abs(velY); }
-  if (ny > gTop)       { ny = gTop;       velY = -Math.abs(velY); }
+  if (nx < BALL_RADIUS)     { nx = BALL_RADIUS;     velX =  Math.abs(velX); }
+  if (nx > w - BALL_RADIUS) { nx = w - BALL_RADIUS; velX = -Math.abs(velX); }
+  if (ny < minY)            { ny = minY;             velY =  Math.abs(velY); }
+  if (ny > maxY)            { ny = maxY;             velY = -Math.abs(velY); }
 
   moveBallTo(nx, ny);
   rafId = requestAnimationFrame(runLoop);
@@ -302,7 +332,6 @@ function catchBall(x, y) {
   clearInterval(rollTickInterval);
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
-  // 演出
   ball.className = 'caught';
   doFlash();
   spawnRipple(x, y, 'rgba(255,220,0,0.7)');
@@ -312,7 +341,6 @@ function catchBall(x, y) {
     showClearText();
   }, 200);
 
-  // 3秒後に次のラウンドへ
   setTimeout(() => {
     hideClearText();
     ball.className = '';
@@ -325,8 +353,8 @@ function onTap(clientX, clientY) {
   if (state === STATE.CATCH || state === STATE.APPEAR) return;
 
   if (state === STATE.HIDE) {
-    // 草むらエリアをタップしたら出現
-    if (clientY >= grassTopY() - 40) {
+    // 草原エリア（空の下）ならどこでもタップ有効
+    if (clientY >= skyHeight()) {
       spawnRipple(clientX, clientY, 'rgba(100,200,100,0.5)');
       startAppear();
     }
@@ -334,14 +362,12 @@ function onTap(clientX, clientY) {
   }
 
   if (state === STATE.RUN) {
-    // ボールに当たったか判定（大きめの当たり判定）
-    const dx = clientX - ballX;
-    const dy = clientY - ballY;
+    const dx   = clientX - ballX;
+    const dy   = clientY - ballY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= BALL_RADIUS * 1.4) {
       catchBall(clientX, clientY);
     } else {
-      // 外れた → ボールが少し逃げる方向に加速
       spawnRipple(clientX, clientY, 'rgba(200,100,100,0.4)');
       const awayAngle = Math.atan2(ballY - clientY, ballX - clientX);
       velX = Math.cos(awayAngle) * BALL_SPEED * 1.5;
@@ -365,9 +391,11 @@ gameEl.addEventListener('mousedown', e => {
 // リサイズ対応
 window.addEventListener('resize', () => {
   resizeCanvas();
-  if (state === STATE.HIDE) hideBallInGrass();
+  drawGrass();
+  if (state === STATE.HIDE) hideBall();
 });
 
 // ===== 起動 =====
 resizeCanvas();
+drawGrass();
 startHide();
