@@ -81,97 +81,102 @@ function playRollTick() {
   playTone(220, 'sine', 0.08, now, 0.15);
 }
 
-/** 拍手SE: ホワイトノイズをバースト状に並べてパチパチ音を合成 */
+/** 拍手SE: 2層クラップ（スナップ+ボディ） + ハイパス＋ピーキングEQ */
 function playApplause() {
   const ac  = getAudio();
   const now = ac.currentTime;
-  const dur = 2.5; // 拍手の長さ（秒）
+  const dur = 2.8;
 
-  // ノイズバッファを生成
   const rate   = ac.sampleRate;
   const frames = Math.ceil(rate * dur);
   const buf    = ac.createBuffer(1, frames, rate);
   const data   = buf.getChannelData(0);
 
-  // パチパチらしいバースト: 15〜20回のクラップ
-  const clapCount = 18;
-  const interval  = dur / clapCount;
+  const clapCount = 20;
   for (let c = 0; c < clapCount; c++) {
-    const onset   = Math.floor((c * interval + rand(-0.02, 0.02)) * rate);
-    const clapLen = Math.floor(rand(0.025, 0.06) * rate);
-    for (let s = 0; s < clapLen && onset + s < frames; s++) {
-      const env = Math.exp(-s / (clapLen * 0.35)); // 鋭い減衰
-      data[onset + s] = (Math.random() * 2 - 1) * env * 0.9;
+    const t     = (c / clapCount) * dur + rand(-0.02, 0.02);
+    const onset = Math.max(0, Math.floor(t * rate));
+
+    // ① スナップ層（3〜7ms、急速減衰）: 「パシッ」の輪郭
+    const snapLen = Math.floor(rand(0.003, 0.007) * rate);
+    for (let s = 0; s < snapLen && onset + s < frames; s++) {
+      data[onset + s] += (Math.random() * 2 - 1) * Math.exp(-s / (snapLen * 0.15)) * 2.5;
+    }
+
+    // ② ボディ層（20〜50ms、ゆっくり減衰）: 「ペタ」の厚み
+    const bodyLen = Math.floor(rand(0.020, 0.050) * rate);
+    for (let s = 0; s < bodyLen && onset + s < frames; s++) {
+      data[onset + s] += (Math.random() * 2 - 1) * Math.exp(-s / (bodyLen * 0.30)) * 0.7;
     }
   }
 
-  const src   = ac.createBufferSource();
-  src.buffer  = buf;
+  const src = ac.createBufferSource();
+  src.buffer = buf;
 
-  // バンドパスフィルタで「手の音」っぽい帯域に絞る
-  const bpf   = ac.createBiquadFilter();
-  bpf.type    = 'bandpass';
-  bpf.frequency.value = 1100;
-  bpf.Q.value = 0.6;
+  // ハイパス: 低域ローリングを除去
+  const hpf = ac.createBiquadFilter();
+  hpf.type  = 'highpass';
+  hpf.frequency.value = 1200;
+
+  // ピーキングEQ: 3kHz 付近にパンチ感を追加
+  const peak = ac.createBiquadFilter();
+  peak.type  = 'peaking';
+  peak.frequency.value = 3000;
+  peak.gain.value      = 8;
+  peak.Q.value         = 1.5;
 
   const gainN = ac.createGain();
-  gainN.gain.setValueAtTime(1.2, now);
+  gainN.gain.setValueAtTime(3.0, now);
   gainN.gain.linearRampToValueAtTime(0, now + dur);
 
-  src.connect(bpf);
-  bpf.connect(gainN);
+  src.connect(hpf);
+  hpf.connect(peak);
+  peak.connect(gainN);
   gainN.connect(ac.destination);
   src.start(now);
   src.stop(now + dur);
 }
 
-/** 歓声SE: 複数のオシレータを重ねてワイワイ感を合成 */
+/** 歓声SE: ホワイトノイズ + スイープするバンドパスで「ワアアア！」を合成 */
 function playCheering() {
   const ac  = getAudio();
   const now = ac.currentTime;
+  const dur = 2.5;
 
-  // 複数の「わー」成分を重ねる
-  const voices = [
-    { base: 220, vibRate: 5.2, vibDepth: 18 },
-    { base: 280, vibRate: 4.8, vibDepth: 22 },
-    { base: 350, vibRate: 6.1, vibDepth: 15 },
-    { base: 440, vibRate: 5.5, vibDepth: 20 },
-    { base: 180, vibRate: 4.3, vibDepth: 12 },
-  ];
+  // ベースノイズバッファ（共有）
+  const rate   = ac.sampleRate;
+  const frames = Math.ceil(rate * dur);
+  const buf    = ac.createBuffer(1, frames, rate);
+  const data   = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
 
-  voices.forEach(({ base, vibRate, vibDepth }, i) => {
-    const osc   = ac.createOscillator();
-    const lfo   = ac.createOscillator(); // ビブラート用LFO
-    const lfoG  = ac.createGain();
+  // 2系統のフォルマント: 周波数が上昇して「ワアアア！」を表現
+  [
+    { fStart: 500,  fPeak: 1600, q: 0.8 },
+    { fStart: 800,  fPeak: 2400, q: 1.2 },
+  ].forEach(({ fStart, fPeak, q }) => {
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+
+    const bpf = ac.createBiquadFilter();
+    bpf.type  = 'bandpass';
+    bpf.Q.value = q;
+    // 0.35秒で一気に上昇 → 緩やかに落ち着く
+    bpf.frequency.setValueAtTime(fStart, now);
+    bpf.frequency.linearRampToValueAtTime(fPeak,          now + 0.35);
+    bpf.frequency.exponentialRampToValueAtTime(fStart * 0.9, now + dur);
+
     const gainN = ac.createGain();
+    gainN.gain.setValueAtTime(0,   now);
+    gainN.gain.linearRampToValueAtTime(3.0, now + 0.2);
+    gainN.gain.setValueAtTime(2.5,          now + 0.8);
+    gainN.gain.linearRampToValueAtTime(0,   now + dur);
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(base + rand(-5, 5), now);
-
-    lfo.frequency.value  = vibRate;
-    lfoG.gain.value      = vibDepth;
-    lfo.connect(lfoG);
-    lfoG.connect(osc.frequency);
-
-    // エンベロープ: 立ち上がって徐々にフェードアウト
-    gainN.gain.setValueAtTime(0, now);
-    gainN.gain.linearRampToValueAtTime(0.06, now + 0.15 + i * 0.04);
-    gainN.gain.setValueAtTime(0.06,          now + 1.2);
-    gainN.gain.linearRampToValueAtTime(0,    now + 2.2);
-
-    // ローパスで高周波を落とし「群衆」らしい丸い音に
-    const lpf = ac.createBiquadFilter();
-    lpf.type  = 'lowpass';
-    lpf.frequency.value = 800;
-
-    osc.connect(gainN);
-    gainN.connect(lpf);
-    lpf.connect(ac.destination);
-
-    lfo.start(now);
-    osc.start(now);
-    lfo.stop(now + 2.2);
-    osc.stop(now + 2.2);
+    src.connect(bpf);
+    bpf.connect(gainN);
+    gainN.connect(ac.destination);
+    src.start(now);
+    src.stop(now + dur);
   });
 }
 
