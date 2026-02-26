@@ -81,6 +81,100 @@ function playRollTick() {
   playTone(220, 'sine', 0.08, now, 0.15);
 }
 
+/** 拍手SE: ホワイトノイズをバースト状に並べてパチパチ音を合成 */
+function playApplause() {
+  const ac  = getAudio();
+  const now = ac.currentTime;
+  const dur = 2.5; // 拍手の長さ（秒）
+
+  // ノイズバッファを生成
+  const rate   = ac.sampleRate;
+  const frames = Math.ceil(rate * dur);
+  const buf    = ac.createBuffer(1, frames, rate);
+  const data   = buf.getChannelData(0);
+
+  // パチパチらしいバースト: 15〜20回のクラップ
+  const clapCount = 18;
+  const interval  = dur / clapCount;
+  for (let c = 0; c < clapCount; c++) {
+    const onset   = Math.floor((c * interval + rand(-0.02, 0.02)) * rate);
+    const clapLen = Math.floor(rand(0.025, 0.06) * rate);
+    for (let s = 0; s < clapLen && onset + s < frames; s++) {
+      const env = Math.exp(-s / (clapLen * 0.35)); // 鋭い減衰
+      data[onset + s] = (Math.random() * 2 - 1) * env * 0.9;
+    }
+  }
+
+  const src   = ac.createBufferSource();
+  src.buffer  = buf;
+
+  // バンドパスフィルタで「手の音」っぽい帯域に絞る
+  const bpf   = ac.createBiquadFilter();
+  bpf.type    = 'bandpass';
+  bpf.frequency.value = 1100;
+  bpf.Q.value = 0.6;
+
+  const gainN = ac.createGain();
+  gainN.gain.setValueAtTime(1.2, now);
+  gainN.gain.linearRampToValueAtTime(0, now + dur);
+
+  src.connect(bpf);
+  bpf.connect(gainN);
+  gainN.connect(ac.destination);
+  src.start(now);
+  src.stop(now + dur);
+}
+
+/** 歓声SE: 複数のオシレータを重ねてワイワイ感を合成 */
+function playCheering() {
+  const ac  = getAudio();
+  const now = ac.currentTime;
+
+  // 複数の「わー」成分を重ねる
+  const voices = [
+    { base: 220, vibRate: 5.2, vibDepth: 18 },
+    { base: 280, vibRate: 4.8, vibDepth: 22 },
+    { base: 350, vibRate: 6.1, vibDepth: 15 },
+    { base: 440, vibRate: 5.5, vibDepth: 20 },
+    { base: 180, vibRate: 4.3, vibDepth: 12 },
+  ];
+
+  voices.forEach(({ base, vibRate, vibDepth }, i) => {
+    const osc   = ac.createOscillator();
+    const lfo   = ac.createOscillator(); // ビブラート用LFO
+    const lfoG  = ac.createGain();
+    const gainN = ac.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(base + rand(-5, 5), now);
+
+    lfo.frequency.value  = vibRate;
+    lfoG.gain.value      = vibDepth;
+    lfo.connect(lfoG);
+    lfoG.connect(osc.frequency);
+
+    // エンベロープ: 立ち上がって徐々にフェードアウト
+    gainN.gain.setValueAtTime(0, now);
+    gainN.gain.linearRampToValueAtTime(0.06, now + 0.15 + i * 0.04);
+    gainN.gain.setValueAtTime(0.06,          now + 1.2);
+    gainN.gain.linearRampToValueAtTime(0,    now + 2.2);
+
+    // ローパスで高周波を落とし「群衆」らしい丸い音に
+    const lpf = ac.createBiquadFilter();
+    lpf.type  = 'lowpass';
+    lpf.frequency.value = 800;
+
+    osc.connect(gainN);
+    gainN.connect(lpf);
+    lpf.connect(ac.destination);
+
+    lfo.start(now);
+    osc.start(now);
+    lfo.stop(now + 2.2);
+    osc.stop(now + 2.2);
+  });
+}
+
 // ===== ユーティリティ =====
 function rand(min, max) { return Math.random() * (max - min) + min; }
 
@@ -331,6 +425,8 @@ function catchBall(x, y) {
   ball.className = 'caught';
   doFlash();
   spawnRipple(x, y, 'rgba(255,220,0,0.7)');
+  playApplause();
+  playCheering();
   setTimeout(() => {
     playFanfare();
     launchConfetti();
