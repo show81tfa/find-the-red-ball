@@ -86,6 +86,23 @@ html, body {
   100% { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
 }
 
+/* ===== 分裂ボール ===== */
+.split-ball {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff6b6b, #e53935 50%, #b71c1c);
+  box-shadow: 3px 5px 12px rgba(0,0,0,0.35), inset -4px -6px 12px rgba(0,0,0,0.2);
+  transform: translate(-50%, -50%);
+}
+.split-ball.running {
+  animation: ball-bounce 0.4s ease-in-out infinite alternate;
+}
+.split-ball.caught {
+  animation: ball-caught 0.5s ease-out forwards;
+}
+
 /* ===== 草むら前景キャンバス ===== */
 #grass-canvas {
   position: absolute;

@@ -17,13 +17,14 @@ const ctx         = confettiCvs.getContext('2d');
 
 // ===== 定数 =====
 const BALL_RADIUS   = 60;   // px（当たり判定半径、表示より少し大きめ）
+const SPLIT_RADIUS  = 40;   // px（分裂ボールの当たり判定半径）
 const HIDE_TIMEOUT  = 5000; // ms: タップなしで自動出現
 const RUN_TIMEOUT   = 10000;// ms: タップなしで自動捕獲
 const CATCH_HOLD    = 3000; // ms: クリア演出の表示時間
 const BALL_SPEED    = 3.5;  // px/frame: 逃げる速さ（ゆっくり目）
 
 // ===== 状態管理 =====
-const STATE = { HIDE: 'HIDE', APPEAR: 'APPEAR', RUN: 'RUN', CATCH: 'CATCH' };
+const STATE = { HIDE: 'HIDE', APPEAR: 'APPEAR', RUN: 'RUN', SPLIT: 'SPLIT', CATCH: 'CATCH' };
 let state        = STATE.HIDE;
 let ballX        = 0;
 let ballY        = 0;
@@ -35,6 +36,8 @@ let confettiArr  = [];
 let confettiRaf  = null;
 let isFirstRound = true;
 let tapBlocked   = false; // 出現直後1秒間のタップ無効フラグ
+let splitBalls   = [];   // 分裂中の2ボール: [{el, x, y, velX, velY, caught}, ...]
+let splitRafId   = null;
 
 // ===== Web Audio =====
 let audioCtx = null;
@@ -360,6 +363,11 @@ function startHide() {
   tapBlocked = false;
   clearTimeout(autoTimer);
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (splitRafId) { cancelAnimationFrame(splitRafId); splitRafId = null; }
+  splitBalls.forEach(b => b.el.remove());
+  splitBalls = [];
+  ball.style.display = '';
+  ball.className = '';
 
   hideBall();
   grassCanvas.classList.add('wiggling');
@@ -439,6 +447,86 @@ function runLoop() {
   rafId = requestAnimationFrame(runLoop);
 }
 
+// ===== SPLIT フェーズ =====
+function createSplitBallEl() {
+  const el = document.createElement('div');
+  el.style.zIndex = '25';
+  gameEl.appendChild(el);
+  return el;
+}
+
+function startSplit(tapX, tapY) {
+  state = STATE.SPLIT;
+  clearInterval(rollTickInterval);
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
+  spawnRipple(tapX, tapY, 'rgba(255,150,50,0.7)');
+  playPop();
+
+  ball.style.display = 'none';
+
+  const currentAngle = Math.atan2(velY, velX);
+  const spd = BALL_SPEED * 1.2;
+
+  splitBalls = [
+    { el: createSplitBallEl(), x: ballX, y: ballY,
+      velX: Math.cos(currentAngle - Math.PI / 3) * spd,
+      velY: Math.sin(currentAngle - Math.PI / 3) * spd, caught: false },
+    { el: createSplitBallEl(), x: ballX, y: ballY,
+      velX: Math.cos(currentAngle + Math.PI / 3) * spd,
+      velY: Math.sin(currentAngle + Math.PI / 3) * spd, caught: false },
+  ];
+
+  splitBalls.forEach(b => {
+    b.el.className = 'split-ball running';
+    b.el.style.left = b.x + 'px';
+    b.el.style.top  = b.y + 'px';
+  });
+
+  splitRafId = requestAnimationFrame(splitLoop);
+}
+
+function splitLoop() {
+  if (state !== STATE.SPLIT) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  const minY = skyHeight() + SPLIT_RADIUS, maxY = h - SPLIT_RADIUS;
+
+  splitBalls.forEach(b => {
+    if (b.caught) return;
+    let nx = b.x + b.velX, ny = b.y + b.velY;
+    if (nx < SPLIT_RADIUS)     { nx = SPLIT_RADIUS;     b.velX =  Math.abs(b.velX); }
+    if (nx > w - SPLIT_RADIUS) { nx = w - SPLIT_RADIUS; b.velX = -Math.abs(b.velX); }
+    if (ny < minY)             { ny = minY;              b.velY =  Math.abs(b.velY); }
+    if (ny > maxY)             { ny = maxY;              b.velY = -Math.abs(b.velY); }
+    b.x = nx; b.y = ny;
+    b.el.style.left = nx + 'px';
+    b.el.style.top  = ny + 'px';
+  });
+  splitRafId = requestAnimationFrame(splitLoop);
+}
+
+function catchSplitBall(b, x, y) {
+  b.caught = true;
+  b.velX = b.velY = 0;
+  b.el.className = 'split-ball caught';
+  spawnRipple(x, y, 'rgba(255,220,0,0.7)');
+  playPop();
+  if (splitBalls.every(sb => sb.caught)) {
+    setTimeout(endSplit, 300);
+  }
+}
+
+function endSplit() {
+  if (splitRafId) { cancelAnimationFrame(splitRafId); splitRafId = null; }
+  state = STATE.CATCH;
+  doFlash();
+  playFanfare();
+  launchConfetti();
+  showClearText();
+  setTimeout(() => { playApplause(); playCheering(); }, 500);
+  setTimeout(() => { hideClearText(); startHide(); }, CATCH_HOLD);
+}
+
 // ===== CATCH フェーズ =====
 function catchBall(x, y) {
   if (state !== STATE.RUN) return;
@@ -490,13 +578,24 @@ function onTap(clientX, clientY) {
     const dy   = clientY - ballY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= BALL_RADIUS * 1.4) {
-      catchBall(clientX, clientY);
+      startSplit(clientX, clientY); // 分裂！
     } else {
       spawnRipple(clientX, clientY, 'rgba(200,100,100,0.4)');
       const awayAngle = Math.atan2(ballY - clientY, ballX - clientX);
       velX = Math.cos(awayAngle) * BALL_SPEED * 1.5;
       velY = Math.sin(awayAngle) * BALL_SPEED * 1.5;
     }
+    return;
+  }
+
+  if (state === STATE.SPLIT) {
+    splitBalls.forEach(b => {
+      if (b.caught) return;
+      const dx = clientX - b.x, dy = clientY - b.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= SPLIT_RADIUS * 1.4) {
+        catchSplitBall(b, clientX, clientY);
+      }
+    });
   }
 }
 
