@@ -420,7 +420,7 @@ function startRun() {
   }, 1000);
 
   rollTickInterval = setInterval(() => {
-    if (state === STATE.RUN) playRollTick();
+    if (state === STATE.RUN || state === STATE.SPLIT) playRollTick();
   }, 400);
 
   rafId = requestAnimationFrame(runLoop);
@@ -457,7 +457,6 @@ function createSplitBallEl() {
 
 function startSplit(tapX, tapY) {
   state = STATE.SPLIT;
-  clearInterval(rollTickInterval);
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
   spawnRipple(tapX, tapY, 'rgba(255,150,50,0.7)');
@@ -518,6 +517,7 @@ function catchSplitBall(b, x, y) {
 
 function endSplit() {
   if (splitRafId) { cancelAnimationFrame(splitRafId); splitRafId = null; }
+  clearInterval(rollTickInterval);
   state = STATE.CATCH;
   doFlash();
   playFanfare();
