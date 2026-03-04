@@ -465,7 +465,7 @@ function startSplit(tapX, tapY) {
   ball.style.display = 'none';
 
   const currentAngle = Math.atan2(velY, velX);
-  const spd = BALL_SPEED * 1.2;
+  const spd = BALL_SPEED * 3; // 分裂直後は3倍速で逃げる
 
   splitBalls = [
     { el: createSplitBallEl(), x: ballX, y: ballY,
@@ -481,6 +481,19 @@ function startSplit(tapX, tapY) {
     b.el.style.left = b.x + 'px';
     b.el.style.top  = b.y + 'px';
   });
+
+  // 1秒間タップ無効、その後通常速度に戻す
+  tapBlocked = true;
+  setTimeout(() => {
+    if (state === STATE.SPLIT) {
+      tapBlocked = false;
+      splitBalls.forEach(b => {
+        if (b.caught) return;
+        const s = Math.sqrt(b.velX * b.velX + b.velY * b.velY);
+        if (s > 0) { b.velX = (b.velX / s) * BALL_SPEED; b.velY = (b.velY / s) * BALL_SPEED; }
+      });
+    }
+  }, 1000);
 
   splitRafId = requestAnimationFrame(splitLoop);
 }
@@ -589,6 +602,7 @@ function onTap(clientX, clientY) {
   }
 
   if (state === STATE.SPLIT) {
+    if (tapBlocked) return; // 分裂直後1秒間はタップ無効
     splitBalls.forEach(b => {
       if (b.caught) return;
       const dx = clientX - b.x, dy = clientY - b.y;
