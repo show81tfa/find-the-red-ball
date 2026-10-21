@@ -41,27 +41,73 @@ let splitRafId   = null;
 
 // ===== Web Audio =====
 let audioCtx = null;
-let audioWarmedUp = false;
+let applauseBuffer = null;
+let resumePending = null;
+let soundRequest = 0;
+const activeSounds = new Set();
 
-/** 初回タップ時にiOSのオーディオハードウェアを起動する（遅延防止） */
-function warmupAudio() {
-  if (audioWarmedUp) return;
-  audioWarmedUp = true;
-  const ac = getAudio();
-  const buf = ac.createBuffer(1, 1, ac.sampleRate);
-  const src = ac.createBufferSource();
-  src.buffer = buf;
-  src.connect(ac.destination);
-  src.start(0);
+function stopSounds() {
+  soundRequest++;
+  activeSounds.forEach(source => { try { source.stop(); } catch (_) {} });
+  activeSounds.clear();
+}
+function trackSound(source) {
+  activeSounds.add(source);
+  source.onended = () => activeSounds.delete(source);
 }
 function getAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioCtx || audioCtx.state === 'closed') {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return null;
+    audioCtx = new Audio({latencyHint: 'interactive'});
+    applauseBuffer = null;
+    audioCtx.onstatechange = () => {
+      if (audioCtx.state !== 'running') stopSounds();
+    };
+  }
   return audioCtx;
+}
+
+// iOSではユーザー操作のたびに復帰を試みる。初回失敗後も再試行できる。
+function warmupAudio() {
+  try {
+    const ac = getAudio();
+    if (!ac) return Promise.resolve(false);
+    if (ac.state === 'running') return Promise.resolve(true);
+    if (!resumePending) {
+      resumePending = ac.resume().then(() => ac.state === 'running', () => false)
+        .finally(() => { resumePending = null; });
+    }
+    return resumePending;
+  } catch (_) { return Promise.resolve(false); }
+}
+
+// 復帰前に音を予約しない。古いタップ音を後からまとめて鳴らさない。
+function playFeedback(play) {
+  const request = ++soundRequest;
+  const tappedAt = performance.now();
+  try {
+    const ac = getAudio();
+    if (!ac || document.hidden) return;
+    if (ac.state === 'running') { play(); return; }
+    warmupAudio().then(ready => {
+      if (ready && request === soundRequest && !document.hidden && performance.now() - tappedAt < 300) {
+        try { play(); } catch (_) {}
+      }
+    });
+  } catch (_) { /* 音声が使えなくてもゲームは続行する。 */ }
+}
+
+function prepareAudio() {
+  try {
+    const ac = getAudio();
+    if (ac) applauseBuffer = buildApplauseBuffer(ac);
+  } catch (_) {}
 }
 
 function playTone(freq, type, duration, startTime, gain = 0.4) {
   const ac    = getAudio();
+  if (!ac || ac.state !== 'running') return;
   const osc   = ac.createOscillator();
   const gainN = ac.createGain();
   osc.connect(gainN);
@@ -70,20 +116,21 @@ function playTone(freq, type, duration, startTime, gain = 0.4) {
   osc.frequency.setValueAtTime(freq, startTime);
   gainN.gain.setValueAtTime(gain, startTime);
   gainN.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+  trackSound(osc);
   osc.start(startTime);
   osc.stop(startTime + duration);
 }
 
 function playPop() {
   const ac = getAudio();
-  const now = ac.currentTime + 0.05;
+  const now = ac.currentTime + 0.005;
   playTone(880,  'sine', 0.12, now,        0.5);
   playTone(1200, 'sine', 0.10, now + 0.05, 0.4);
 }
 
 function playFanfare() {
   const ac  = getAudio();
-  const now = ac.currentTime + 0.05;
+  const now = ac.currentTime + 0.005;
   const notes = [523, 587, 659, 698, 784];
   notes.forEach((f, i) => {
     playTone(f, 'triangle', 0.25, now + i * 0.12, 0.45);
@@ -95,16 +142,13 @@ function playFanfare() {
 
 function playRollTick() {
   const ac  = getAudio();
-  const now = ac.currentTime + 0.05;
+  const now = ac.currentTime + 0.005;
   playTone(220, 'sine', 0.08, now, 0.15);
 }
 
 /** 拍手SE: 2層クラップ（スナップ+ボディ） + ハイパス＋ピーキングEQ */
-function playApplause() {
-  const ac  = getAudio();
-  const now = ac.currentTime + 0.05;
+function buildApplauseBuffer(ac) {
   const dur = 2.8;
-
   const rate   = ac.sampleRate;
   const frames = Math.ceil(rate * dur);
   const buf    = ac.createBuffer(1, frames, rate);
@@ -128,8 +172,18 @@ function playApplause() {
     }
   }
 
+  return buf;
+}
+
+function playApplause() {
+  const ac = getAudio();
+  if (!ac || ac.state !== 'running') return;
+  const now = ac.currentTime + 0.005;
+  const dur = 2.8;
+  if (!applauseBuffer) applauseBuffer = buildApplauseBuffer(ac);
   const src = ac.createBufferSource();
-  src.buffer = buf;
+  src.buffer = applauseBuffer;
+  trackSound(src);
 
   // ハイパス: 低域ローリングを除去
   const hpf = ac.createBiquadFilter();
@@ -144,7 +198,7 @@ function playApplause() {
   peak.Q.value         = 1.5;
 
   const gainN = ac.createGain();
-  gainN.gain.setValueAtTime(3.0, now);
+  gainN.gain.setValueAtTime(0.65, now);
   gainN.gain.linearRampToValueAtTime(0, now + dur);
 
   src.connect(hpf);
@@ -158,7 +212,7 @@ function playApplause() {
 /** 歓声SE: ホワイトノイズ + スイープするバンドパスで「ワアアア！」を合成 */
 function playCheering() {
   const ac  = getAudio();
-  const now = ac.currentTime + 0.05;
+  const now = ac.currentTime + 0.005;
   const dur = 2.5;
 
   // ベースノイズバッファ（共有）
@@ -464,9 +518,11 @@ function wrongBall(b) {
   b.el.classList.remove('wrong');
   void b.el.offsetWidth;
   b.el.classList.add('wrong');
-  const ac = getAudio();
-  playTone(170, 'triangle', 0.14, ac.currentTime + 0.02, 0.12);
-  playTone(130, 'triangle', 0.18, ac.currentTime + 0.19, 0.12);
+  playFeedback(() => {
+    const ac = getAudio();
+    playTone(170, 'triangle', 0.14, ac.currentTime + 0.005, 0.12);
+    playTone(130, 'triangle', 0.18, ac.currentTime + 0.17, 0.12);
+  });
   showColorHint(true);
   clearTimeout(feedbackTimer);
   feedbackTimer = setTimeout(() => {
@@ -630,7 +686,7 @@ function endSplit() {
   clearInterval(rollTickInterval);
   state = STATE.CATCH;
   doFlash();
-  playFanfare();
+  playFeedback(() => { playFanfare(); playApplause(); });
   launchConfetti();
   showClearText();
   setTimeout(() => { playApplause(); playCheering(); }, 500);
@@ -649,12 +705,9 @@ function catchBall(x, y) {
   ball.className = 'caught';
   doFlash();
   spawnRipple(x, y, 'rgba(255,220,0,0.7)');
-  playFanfare();
+  playFeedback(() => { playFanfare(); playApplause(); });
   launchConfetti();
   showClearText();
-  setTimeout(() => {
-    // 穏やかなファンファーレと紙吹雪でお祝い。
-  }, 500);
 
   setTimeout(() => {
     hideClearText();
@@ -696,7 +749,12 @@ window.addEventListener('resize', () => {
   if (state === STATE.RUN) startHide();
 });
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopSounds();
+});
+
 // ===== 起動 =====
+prepareAudio();
 resizeCanvas();
 drawGrass();
 startHide();
