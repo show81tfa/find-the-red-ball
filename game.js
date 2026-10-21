@@ -21,7 +21,7 @@ const SPLIT_RADIUS  = 40;   // px（分裂ボールの当たり判定半径）
 const HIDE_TIMEOUT  = 5000; // ms: タップなしで自動出現
 const RUN_TIMEOUT   = 10000;// ms: タップなしで自動捕獲
 const CATCH_HOLD    = 3000; // ms: クリア演出の表示時間
-const BALL_SPEED    = 3.5;  // px/frame: 逃げる速さ（ゆっくり目）
+const BALL_SPEED    = 0.7;  // px/frame: 逃げる速さ（ゆっくり目）
 
 // ===== 状態管理 =====
 const STATE = { HIDE: 'HIDE', APPEAR: 'APPEAR', RUN: 'RUN', SPLIT: 'SPLIT', CATCH: 'CATCH' };
@@ -358,24 +358,104 @@ function hideBall() {
 }
 
 // ===== HIDE フェーズ開始 =====
+// 2歳向け: 3色を常に見せ、色を選ぶことに集中する。
+let dummyBalls = [];
+let feedbackTimer = null;
+let lastWrongAt = -Infinity;
+let movingBalls = [];
+let motionStartedAt = null;
+
+function animateChoices(timestamp) {
+  if (state !== STATE.RUN) return;
+  const dt = motionStartedAt === null ? 0 : Math.min((timestamp - motionStartedAt) / 1000, 0.05);
+  motionStartedAt = timestamp;
+  const radius = parseFloat(ball.style.width) / 2;
+  const minX = radius, maxX = innerWidth - radius;
+  const minY = skyHeight() + radius, maxY = innerHeight - radius;
+  movingBalls.forEach((b, i) => {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    // 元のゲームと同じ、直進して画面の端で跳ね返る動き。
+    if (b.x < minX) { b.x = minX; b.vx = Math.abs(b.vx); }
+    if (b.x > maxX) { b.x = maxX; b.vx = -Math.abs(b.vx); }
+    if (b.y < minY) { b.y = minY; b.vy = Math.abs(b.vy); }
+    if (b.y > maxY) { b.y = maxY; b.vy = -Math.abs(b.vy); }
+    if (i === 0) moveBallTo(b.x, b.y);
+    else {
+      b.el.style.left = b.x + 'px';
+      b.el.style.top = b.y + 'px';
+    }
+  });
+  rafId = requestAnimationFrame(animateChoices);
+}
+
 function startHide() {
-  state = STATE.HIDE;
+  state = STATE.RUN;
   tapBlocked = false;
   clearTimeout(autoTimer);
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  if (splitRafId) { cancelAnimationFrame(splitRafId); splitRafId = null; }
-  splitBalls.forEach(b => b.el.remove());
-  splitBalls = [];
+  clearTimeout(feedbackTimer);
+  if (rafId) cancelAnimationFrame(rafId);
+  dummyBalls.forEach(b => b.el.remove());
+  dummyBalls = [];
   ball.style.display = '';
-  ball.className = '';
-
-  hideBall();
-  grassCanvas.classList.add('wiggling');
-
-  hintText.textContent = 'どこかにかくれているよ！';
+  ball.style.zIndex = '26';
+  ball.className = 'running';
+  grassCanvas.classList.remove('wiggling');
+  hintText.textContent = 'あかい ボールは どれかな？';
   hintText.classList.remove('hidden');
 
-  // 自動出現タイマーなし（子供が自分で見つけるまで待つ）
+  // 大きなタップ領域を確保し、重ならない3つの場所に配置。
+  const w = innerWidth, h = innerHeight;
+  const size = Math.min(120, w * 0.25, h * 0.20);
+  const positions = [
+    {x: w * 0.27, y: h * 0.43},
+    {x: w * 0.73, y: h * 0.43},
+    {x: w * 0.50, y: h * 0.73},
+  ];
+  // 正解の位置を毎回変える。
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+  ball.style.width = ball.style.height = size + 'px';
+  moveBallTo(positions[0].x, positions[0].y);
+  ball.setAttribute('aria-label', '赤いボール');
+  ['blue', 'yellow'].forEach((color, i) => {
+    const el = document.createElement('div');
+    el.className = 'dummy-ball ' + color;
+    el.style.width = el.style.height = size + 'px';
+    el.style.left = positions[i + 1].x + 'px';
+    el.style.top = positions[i + 1].y + 'px';
+    el.setAttribute('aria-label', color === 'blue' ? '青いボール' : '黄色いボール');
+    gameEl.appendChild(el);
+    dummyBalls.push({el, ...positions[i + 1]});
+  });
+  movingBalls = [{el: ball, x: ballX, y: ballY}, ...dummyBalls];
+  movingBalls.forEach(b => {
+    const angle = rand(0, Math.PI * 2);
+    b.vx = Math.cos(angle) * 160;
+    b.vy = Math.sin(angle) * 160;
+  });
+  motionStartedAt = null;
+  rafId = requestAnimationFrame(animateChoices);
+}
+
+function wrongBall(b) {
+  const now = performance.now();
+  if (now - lastWrongAt < 650) return;
+  lastWrongAt = now;
+  b.el.classList.remove('wrong');
+  void b.el.offsetWidth;
+  b.el.classList.add('wrong');
+  const ac = getAudio();
+  playTone(170, 'triangle', 0.14, ac.currentTime + 0.02, 0.12);
+  playTone(130, 'triangle', 0.18, ac.currentTime + 0.19, 0.12);
+  hintText.textContent = 'あかい ボールを さがそう';
+  clearTimeout(feedbackTimer);
+  feedbackTimer = setTimeout(() => {
+    b.el.classList.remove('wrong');
+    if (state === STATE.RUN) hintText.textContent = 'あかい ボールは どれかな？';
+  }, 1100);
 }
 
 // ===== APPEAR フェーズ =====
@@ -556,8 +636,7 @@ function catchBall(x, y) {
   launchConfetti();
   showClearText();
   setTimeout(() => {
-    playApplause();
-    playCheering();
+    // 穏やかなファンファーレと紙吹雪でお祝い。
   }, 500);
 
   setTimeout(() => {
@@ -569,71 +648,39 @@ function catchBall(x, y) {
 
 // ===== タッチ / クリック処理 =====
 function onTap(clientX, clientY) {
-  if (state === STATE.CATCH || state === STATE.APPEAR) return;
-
-  if (state === STATE.HIDE) {
-    // RUNフェーズと同じ距離判定でボールの隠れ位置付近のみ反応
-    if (clientY >= skyHeight()) {
-      const dx   = clientX - ballX;
-      const dy   = clientY - ballY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= BALL_RADIUS * 1.4) {
-        spawnRipple(clientX, clientY, 'rgba(100,200,100,0.5)');
-        startAppear();
-      }
-    }
+  if (state !== STATE.RUN) return;
+  const radius = parseFloat(ball.style.width) / 2;
+  // 重なったときも、最前面に見えている赤を優先する。
+  if (Math.hypot(clientX - ballX, clientY - ballY) <= radius * 1.12) {
+    clearTimeout(feedbackTimer);
+    hintText.classList.add('hidden');
+    dummyBalls.forEach(b => b.el.classList.add('quiet'));
+    catchBall(clientX, clientY);
     return;
   }
-
-  if (state === STATE.RUN) {
-    if (tapBlocked) return; // 出現直後1秒間はタップ無効
-    const dx   = clientX - ballX;
-    const dy   = clientY - ballY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= BALL_RADIUS * 1.4) {
-      startSplit(clientX, clientY); // 分裂！
-    } else {
-      spawnRipple(clientX, clientY, 'rgba(200,100,100,0.4)');
-      const awayAngle = Math.atan2(ballY - clientY, ballX - clientX);
-      velX = Math.cos(awayAngle) * BALL_SPEED * 1.5;
-      velY = Math.sin(awayAngle) * BALL_SPEED * 1.5;
+  for (const b of [...dummyBalls].reverse()) {
+    if (Math.hypot(clientX - b.x, clientY - b.y) <= radius * 1.12) {
+      wrongBall(b);
+      return;
     }
-    return;
-  }
-
-  if (state === STATE.SPLIT) {
-    if (tapBlocked) return; // 分裂直後1秒間はタップ無効
-    splitBalls.forEach(b => {
-      if (b.caught) return;
-      const dx = clientX - b.x, dy = clientY - b.y;
-      if (Math.sqrt(dx * dx + dy * dy) <= SPLIT_RADIUS * 1.4) {
-        catchSplitBall(b, clientX, clientY);
-      }
-    });
   }
 }
 
-// タッチイベント
-gameEl.addEventListener('touchstart', e => {
+// Pointer Eventsでタッチとマウスを統一し、二重入力を防ぐ。
+gameEl.addEventListener('pointerdown', e => {
   e.preventDefault();
   warmupAudio();
-  const t = e.changedTouches[0];
-  onTap(t.clientX, t.clientY);
-}, { passive: false });
-
-// マウスフォールバック（PC テスト用）
-gameEl.addEventListener('mousedown', e => {
   onTap(e.clientX, e.clientY);
 });
 
-// リサイズ対応
 window.addEventListener('resize', () => {
   resizeCanvas();
   drawGrass();
-  if (state === STATE.HIDE) hideBall();
+  if (state === STATE.RUN) startHide();
 });
 
 // ===== 起動 =====
 resizeCanvas();
 drawGrass();
 startHide();
+
