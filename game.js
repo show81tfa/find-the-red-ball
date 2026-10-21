@@ -358,7 +358,19 @@ function hideBall() {
 }
 
 // ===== HIDE フェーズ開始 =====
-// 2歳向け: 3色を常に見せ、色を選ぶことに集中する。
+// 2歳向け: 5色から指定された色を選ぶ。
+const CHOICE_COLORS = [
+  {id: 'red', name: 'あかい', ink: '#e53935', gradient: '#ff6b6b, #e53935 50%, #b71c1c'},
+  {id: 'blue', name: 'あおい', ink: '#1976d2', gradient: '#80d4ff, #1976d2 55%, #0d47a1'},
+  {id: 'yellow', name: 'きいろい', ink: '#ffdf24', gradient: '#fff9ae, #ffdf24 55%, #e6a800'},
+  {id: 'white', name: 'しろい', ink: '#ffffff', gradient: '#ffffff, #f5f5f5 55%, #bdbdbd'},
+  {id: 'black', name: 'くろい', ink: '#171717', gradient: '#666666, #222222 55%, #000000'},
+];
+let targetColorIndex = 0;
+function showColorHint(retry = false) {
+  const target = CHOICE_COLORS[targetColorIndex];
+  hintText.innerHTML = '<span class="target-color" style="color:' + target.ink + '">' + target.name + ' ボール</span>' + (retry ? 'を さがそう' : 'は どれかな？');
+}
 let dummyBalls = [];
 let feedbackTimer = null;
 let lastWrongAt = -Infinity;
@@ -389,7 +401,9 @@ function animateChoices(timestamp) {
   rafId = requestAnimationFrame(animateChoices);
 }
 
-function startHide() {
+function startHide(advance = false) {
+  if (advance) targetColorIndex = (targetColorIndex + 1) % CHOICE_COLORS.length;
+  const target = CHOICE_COLORS[targetColorIndex];
   state = STATE.RUN;
   tapBlocked = false;
   clearTimeout(autoTimer);
@@ -401,32 +415,35 @@ function startHide() {
   ball.style.zIndex = '26';
   ball.className = 'running';
   grassCanvas.classList.remove('wiggling');
-  hintText.textContent = 'あかい ボールは どれかな？';
+  showColorHint();
   hintText.classList.remove('hidden');
 
-  // 大きなタップ領域を確保し、重ならない3つの場所に配置。
+  // 初期配置では5つが重ならないようにする。
   const w = innerWidth, h = innerHeight;
-  const size = Math.min(120, w * 0.25, h * 0.20);
+  const size = Math.min(120, w * 0.22, h * 0.17);
   const positions = [
-    {x: w * 0.27, y: h * 0.43},
-    {x: w * 0.73, y: h * 0.43},
-    {x: w * 0.50, y: h * 0.73},
-  ];
-  // 正解の位置を毎回変える。
+    {x: w * 0.22, y: h * 0.35},
+    {x: w * 0.78, y: h * 0.35},
+    {x: w * 0.50, y: h * 0.55},
+    {x: w * 0.22, y: h * 0.78},
+    {x: w * 0.78, y: h * 0.78},
+  ];  // 正解の位置を毎回変える。
   for (let i = positions.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [positions[i], positions[j]] = [positions[j], positions[i]];
   }
   ball.style.width = ball.style.height = size + 'px';
   moveBallTo(positions[0].x, positions[0].y);
-  ball.setAttribute('aria-label', '赤いボール');
-  ['blue', 'yellow'].forEach((color, i) => {
+  ball.setAttribute('aria-label', target.name + 'ボール');
+  ball.style.background = 'radial-gradient(circle at 35% 35%, ' + target.gradient + ')';
+  CHOICE_COLORS.filter(color => color.id !== target.id).forEach((color, i) => {
     const el = document.createElement('div');
-    el.className = 'dummy-ball ' + color;
+    el.className = 'dummy-ball ' + color.id;
     el.style.width = el.style.height = size + 'px';
     el.style.left = positions[i + 1].x + 'px';
     el.style.top = positions[i + 1].y + 'px';
-    el.setAttribute('aria-label', color === 'blue' ? '青いボール' : '黄色いボール');
+    el.setAttribute('aria-label', color.name + 'ボール');
+    el.style.background = 'radial-gradient(circle at 35% 35%, ' + color.gradient + ')';
     gameEl.appendChild(el);
     dummyBalls.push({el, ...positions[i + 1]});
   });
@@ -450,11 +467,11 @@ function wrongBall(b) {
   const ac = getAudio();
   playTone(170, 'triangle', 0.14, ac.currentTime + 0.02, 0.12);
   playTone(130, 'triangle', 0.18, ac.currentTime + 0.19, 0.12);
-  hintText.textContent = 'あかい ボールを さがそう';
+  showColorHint(true);
   clearTimeout(feedbackTimer);
   feedbackTimer = setTimeout(() => {
     b.el.classList.remove('wrong');
-    if (state === STATE.RUN) hintText.textContent = 'あかい ボールは どれかな？';
+    if (state === STATE.RUN) showColorHint();
   }, 1100);
 }
 
@@ -642,7 +659,7 @@ function catchBall(x, y) {
   setTimeout(() => {
     hideClearText();
     ball.className = '';
-    startHide();
+    startHide(true);
   }, CATCH_HOLD);
 }
 
@@ -650,7 +667,7 @@ function catchBall(x, y) {
 function onTap(clientX, clientY) {
   if (state !== STATE.RUN) return;
   const radius = parseFloat(ball.style.width) / 2;
-  // 重なったときも、最前面に見えている赤を優先する。
+  // 重なったときも、最前面に見えている正解色を優先する。
   if (Math.hypot(clientX - ballX, clientY - ballY) <= radius * 1.12) {
     clearTimeout(feedbackTimer);
     hintText.classList.add('hidden');

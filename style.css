@@ -173,6 +173,12 @@ html, body {
   opacity: 0;
 }
 
+.target-color {
+  -webkit-text-stroke: 1px rgba(0,0,0,0.55);
+  paint-order: stroke fill;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
 /* 2歳向けの色選び: 大きな3色、短く穏やかな間違いフィードバック */
 .dummy-ball {
   position: absolute;
