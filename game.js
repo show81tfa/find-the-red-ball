@@ -42,12 +42,13 @@ let splitRafId   = null;
 // ===== Web Audio =====
 let audioCtx = null;
 let applauseBuffer = null;
-let resumePending = null;
+let pendingFeedback = null;
 let soundRequest = 0;
 const activeSounds = new Set();
 
 function stopSounds() {
   soundRequest++;
+  pendingFeedback = null;
   activeSounds.forEach(source => { try { source.stop(); } catch (_) {} });
   activeSounds.clear();
 }
@@ -62,46 +63,46 @@ function getAudio() {
     audioCtx = new Audio({latencyHint: 'interactive'});
     applauseBuffer = null;
     audioCtx.onstatechange = () => {
-      if (audioCtx.state !== 'running') stopSounds();
+      if (audioCtx.state === 'running') flushFeedback();
+      else if (document.hidden) stopSounds();
     };
   }
   return audioCtx;
 }
 
-// iOSではユーザー操作のたびに復帰を試みる。初回失敗後も再試行できる。
+// iOSではタッチ操作内で無音バッファを再生して音声出力を起動する。
+// resume()が保留のままでも、次の操作で必ず再試行する。
 function warmupAudio() {
   try {
     const ac = getAudio();
-    if (!ac) return Promise.resolve(false);
-    if (ac.state === 'running') return Promise.resolve(true);
-    if (!resumePending) {
-      resumePending = ac.resume().then(() => ac.state === 'running', () => false)
-        .finally(() => { resumePending = null; });
-    }
-    return resumePending;
-  } catch (_) { return Promise.resolve(false); }
+    if (!ac) return;
+    if (ac.state !== 'running') {
+      const source = ac.createBufferSource();
+      source.buffer = ac.createBuffer(1, 1, ac.sampleRate);
+      source.connect(ac.destination);
+      source.start(0);
+      Promise.resolve(ac.resume()).then(flushFeedback, () => {});
+    } else flushFeedback();
+  } catch (_) { /* 音声起動失敗後も、次の操作で再試行する。 */ }
 }
 
-// 復帰前に音を予約しない。古いタップ音を後からまとめて鳴らさない。
+function flushFeedback() {
+  if (!pendingFeedback || !audioCtx || audioCtx.state !== 'running') return;
+  const feedback = pendingFeedback;
+  pendingFeedback = null;
+  if (feedback.request !== soundRequest || document.hidden || performance.now() - feedback.at > 1000) return;
+  try { feedback.play(); } catch (_) {}
+}
+
 function playFeedback(play) {
-  const request = ++soundRequest;
-  const tappedAt = performance.now();
-  try {
-    const ac = getAudio();
-    if (!ac || document.hidden) return;
-    if (ac.state === 'running') { play(); return; }
-    warmupAudio().then(ready => {
-      if (ready && request === soundRequest && !document.hidden && performance.now() - tappedAt < 300) {
-        try { play(); } catch (_) {}
-      }
-    });
-  } catch (_) { /* 音声が使えなくてもゲームは続行する。 */ }
+  pendingFeedback = {request: ++soundRequest, at: performance.now(), play};
+  warmupAudio();
 }
 
 function prepareAudio() {
   try {
     const ac = getAudio();
-    if (ac) applauseBuffer = buildApplauseBuffer(ac);
+    if (ac && !applauseBuffer) applauseBuffer = buildApplauseBuffer(ac);
   } catch (_) {}
 }
 
@@ -743,6 +744,11 @@ gameEl.addEventListener('pointerdown', e => {
   onTap(e.clientX, e.clientY);
 });
 
+// Safariで音声の許可が成立するtouchend/pointerupでも起動を試す。
+gameEl.addEventListener('touchend', warmupAudio, {passive: true});
+gameEl.addEventListener('pointerup', warmupAudio);
+gameEl.addEventListener('click', warmupAudio);
+
 window.addEventListener('resize', () => {
   resizeCanvas();
   drawGrass();
@@ -754,7 +760,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ===== 起動 =====
-prepareAudio();
+// AudioContextは最初のユーザー操作内で作成する。
 resizeCanvas();
 drawGrass();
 startHide();
