@@ -750,56 +750,57 @@ function onTap(clientX, clientY) {
   }
 }
 
-// 押している途中で2本目が触れたら、全ての指を離すまでグループ全体を無効にする。
-const heldPointers = new Set();
-let press = null;
+// 同時に触れた一連の操作をまとめ、全ての点が正解なら最後の指を離したときに確定。
+const heldPointers = new Map();
 let invalidPress = false;
+let pressedRound = null;
+let wrongChoice = null;
 function choiceAt(x, y) {
   const radius = parseFloat(ball.style.width) / 2 * 1.12;
   if (Math.hypot(x - ballX, y - ballY) <= radius) return ball;
   return [...dummyBalls].reverse().find(b => Math.hypot(x - b.x, y - b.y) <= radius) || null;
 }
+function resetPress() {
+  heldPointers.clear();
+  invalidPress = false;
+  pressedRound = null;
+  wrongChoice = null;
+}
 gameEl.addEventListener('pointerdown', e => {
   e.preventDefault();
   warmupAudio();
-  heldPointers.add(e.pointerId);
-  if (heldPointers.size !== 1 || e.isPrimary === false || (e.pointerType === 'mouse' && e.button !== 0)) {
-    invalidPress = true;
-    press = null;
-    return;
+  if (heldPointers.size === 0) {
+    invalidPress = state !== STATE.RUN;
+    pressedRound = roundBallCount;
+    wrongChoice = null;
   }
-  if (invalidPress || state !== STATE.RUN) return;
-  press = {id: e.pointerId, x: e.clientX, y: e.clientY,
-    choice: choiceAt(e.clientX, e.clientY), round: roundBallCount};
+  const choice = choiceAt(e.clientX, e.clientY);
+  heldPointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (choice !== ball || state !== STATE.RUN ||
+      (e.pointerType === 'mouse' && e.button !== 0)) invalidPress = true;
+  if (choice && choice !== ball) wrongChoice = choice;
   gameEl.setPointerCapture?.(e.pointerId);
 });
 window.addEventListener('pointermove', e => {
-  if (press && e.pointerId === press.id && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 30) {
-    invalidPress = true;
-  }
+  const point = heldPointers.get(e.pointerId);
+  if (point && Math.hypot(e.clientX - point.x, e.clientY - point.y) > 30) invalidPress = true;
 });
 function finishPress(e, cancelled = false) {
-  if (!heldPointers.has(e.pointerId)) return;
-  const selected = press;
-  const valid = !cancelled && !invalidPress && heldPointers.size === 1 &&
-    selected && selected.id === e.pointerId && selected.round === roundBallCount && state === STATE.RUN &&
-    Math.hypot(e.clientX - selected.x, e.clientY - selected.y) <= 30;
+  const point = heldPointers.get(e.pointerId);
+  if (!point) return;
+  if (cancelled || Math.hypot(e.clientX - point.x, e.clientY - point.y) > 30) invalidPress = true;
   heldPointers.delete(e.pointerId);
-  if (cancelled) invalidPress = true;
-  press = null;
-  if (valid && selected.choice) {
-    if (selected.choice === ball) onTap(ballX, ballY);
-    else if (dummyBalls.includes(selected.choice)) wrongBall(selected.choice);
-  }
-  if (heldPointers.size === 0) invalidPress = false;
+  if (heldPointers.size > 0) return;
+  const sameRound = state === STATE.RUN && pressedRound === roundBallCount;
+  const valid = sameRound && !invalidPress;
+  const wrong = wrongChoice;
+  resetPress();
+  if (valid) onTap(ballX, ballY);
+  else if (sameRound && !cancelled && wrong && dummyBalls.includes(wrong)) wrongBall(wrong);
 }
 window.addEventListener('pointerup', e => finishPress(e));
 window.addEventListener('pointercancel', e => finishPress(e, true));
-window.addEventListener('blur', () => {
-  heldPointers.clear();
-  press = null;
-  invalidPress = false;
-});
+window.addEventListener('blur', resetPress);
 
 // Safariで音声の許可が成立するtouchend/pointerupでも起動を試す。
 gameEl.addEventListener('touchend', warmupAudio, {passive: true});
