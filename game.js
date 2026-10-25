@@ -199,7 +199,7 @@ function playApplause() {
   peak.Q.value         = 1.5;
 
   const gainN = ac.createGain();
-  gainN.gain.setValueAtTime(0.65, now);
+  gainN.gain.setValueAtTime(3.0, now);
   gainN.gain.linearRampToValueAtTime(0, now + dur);
 
   src.connect(hpf);
@@ -422,6 +422,7 @@ const CHOICE_COLORS = [
   {id: 'black', name: 'くろい', ink: '#171717', gradient: '#666666, #222222 55%, #000000'},
 ];
 let targetColorIndex = 0;
+let roundBallCount = 5;
 function showColorHint(retry = false) {
   const target = CHOICE_COLORS[targetColorIndex];
   hintText.innerHTML = '<span class="target-color" style="color:' + target.ink + '">' + target.name + ' ボール</span>' + (retry ? 'を さがそう' : 'は どれかな？');
@@ -457,7 +458,10 @@ function animateChoices(timestamp) {
 }
 
 function startHide(advance = false) {
-  if (advance) targetColorIndex = (targetColorIndex + 1) % CHOICE_COLORS.length;
+  if (advance) {
+    targetColorIndex = (targetColorIndex + 1) % CHOICE_COLORS.length;
+    roundBallCount++;
+  }
   const target = CHOICE_COLORS[targetColorIndex];
   state = STATE.RUN;
   tapBlocked = false;
@@ -473,16 +477,18 @@ function startHide(advance = false) {
   showColorHint();
   hintText.classList.remove('hidden');
 
-  // 初期配置では5つが重ならないようにする。
+  // 毎クリアで1個追加。正解色は1個だけにして、他の色を増やす。
   const w = innerWidth, h = innerHeight;
-  const size = Math.min(120, w * 0.22, h * 0.17);
-  const positions = [
-    {x: w * 0.22, y: h * 0.35},
-    {x: w * 0.78, y: h * 0.35},
-    {x: w * 0.50, y: h * 0.55},
-    {x: w * 0.22, y: h * 0.78},
-    {x: w * 0.78, y: h * 0.78},
-  ];  // 正解の位置を毎回変える。
+  const top = h * 0.24, areaHeight = h * 0.70;
+  const columns = Math.max(1, Math.ceil(Math.sqrt(roundBallCount * w / areaHeight)));
+  const rows = Math.ceil(roundBallCount / columns);
+  const cellW = w / columns, cellH = areaHeight / rows;
+  const size = Math.min(120, w * 0.22, h * 0.17, cellW * 0.72, cellH * 0.72);
+  const positions = Array.from({length: roundBallCount}, (_, i) => ({
+    x: ((i % columns) + 0.5) * cellW,
+    y: top + (Math.floor(i / columns) + 0.5) * cellH,
+  }));
+  // 正解の位置を毎回変える。
   for (let i = positions.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [positions[i], positions[j]] = [positions[j], positions[i]];
@@ -491,7 +497,8 @@ function startHide(advance = false) {
   moveBallTo(positions[0].x, positions[0].y);
   ball.setAttribute('aria-label', target.name + 'ボール');
   ball.style.background = 'radial-gradient(circle at 35% 35%, ' + target.gradient + ')';
-  CHOICE_COLORS.filter(color => color.id !== target.id).forEach((color, i) => {
+  const wrongColors = CHOICE_COLORS.filter(color => color.id !== target.id);
+  Array.from({length: roundBallCount - 1}, (_, i) => wrongColors[i % wrongColors.length]).forEach((color, i) => {
     const el = document.createElement('div');
     el.className = 'dummy-ball ' + color.id;
     el.style.width = el.style.height = size + 'px';
@@ -521,8 +528,9 @@ function wrongBall(b) {
   b.el.classList.add('wrong');
   playFeedback(() => {
     const ac = getAudio();
-    playTone(170, 'triangle', 0.14, ac.currentTime + 0.005, 0.12);
-    playTone(130, 'triangle', 0.18, ac.currentTime + 0.17, 0.12);
+    // スマートフォンでも聞こえやすい倍音を含む、短い2回のブザー。
+    playTone(260, 'square', 0.22, ac.currentTime + 0.005, 0.24);
+    playTone(220, 'square', 0.28, ac.currentTime + 0.29, 0.24);
   });
   showColorHint(true);
   clearTimeout(feedbackTimer);
