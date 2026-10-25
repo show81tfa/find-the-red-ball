@@ -419,8 +419,8 @@ const CHOICE_COLORS = [
   {id: 'green', name: 'みどりの', ink: '#00b83f', gradient: '#8affaa, #00cc44 55%, #00752b'},
   {id: 'blue', name: 'あおい', ink: '#1976d2', gradient: '#80d4ff, #1976d2 55%, #0d47a1'},
   {id: 'yellow', name: 'きいろい', ink: '#ffdf24', gradient: '#fff9ae, #ffdf24 55%, #e6a800'},
-  {id: 'cyan', name: 'シアンの', ink: '#00d9e8', gradient: '#adffff, #00e5ed 55%, #008eaa'},
-  {id: 'magenta', name: 'マゼンタの', ink: '#e600dc', gradient: '#ffaeff, #ed00dc 55%, #95008d'},
+  {id: 'cyan', name: 'みずいろの', ink: '#00d9e8', gradient: '#adffff, #00e5ed 55%, #008eaa'},
+  {id: 'magenta', name: 'ピンクの', ink: '#e600dc', gradient: '#ffaeff, #ed00dc 55%, #95008d'},
   {id: 'white', name: 'しろい', ink: '#ffffff', gradient: '#ffffff, #f5f5f5 55%, #bdbdbd'},
   {id: 'black', name: 'くろい', ink: '#171717', gradient: '#666666, #222222 55%, #000000'},
 ];
