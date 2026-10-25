@@ -136,7 +136,7 @@ function playFanfare() {
   notes.forEach((f, i) => {
     playTone(f, 'triangle', 0.25, now + i * 0.12, 0.45);
   });
-  [523, 659, 784].forEach(f => {
+  [523, 659, 784, 1046].forEach(f => {
     playTone(f, 'triangle', 0.5, now + notes.length * 0.12, 0.35);
   });
 }
@@ -155,7 +155,7 @@ function buildApplauseBuffer(ac) {
   const buf    = ac.createBuffer(1, frames, rate);
   const data   = buf.getChannelData(0);
 
-  const clapCount = 20;
+  const clapCount = 42;
   for (let c = 0; c < clapCount; c++) {
     const t     = (c / clapCount) * dur + rand(-0.02, 0.02);
     const onset = Math.max(0, Math.floor(t * rate));
@@ -241,8 +241,8 @@ function playCheering() {
 
     const gainN = ac.createGain();
     gainN.gain.setValueAtTime(0,   now);
-    gainN.gain.linearRampToValueAtTime(3.0, now + 0.2);
-    gainN.gain.setValueAtTime(2.5,          now + 0.8);
+    gainN.gain.linearRampToValueAtTime(0.55, now + 0.2);
+    gainN.gain.setValueAtTime(0.4,          now + 0.8);
     gainN.gain.linearRampToValueAtTime(0,   now + dur);
 
     src.connect(bpf);
@@ -413,11 +413,14 @@ function hideBall() {
 }
 
 // ===== HIDE フェーズ開始 =====
-// 2歳向け: 5色から指定された色を選ぶ。
+// 2歳向け: 8色から指定された色を選ぶ。
 const CHOICE_COLORS = [
   {id: 'red', name: 'あかい', ink: '#e53935', gradient: '#ff6b6b, #e53935 50%, #b71c1c'},
+  {id: 'green', name: 'みどりの', ink: '#00b83f', gradient: '#8affaa, #00cc44 55%, #00752b'},
   {id: 'blue', name: 'あおい', ink: '#1976d2', gradient: '#80d4ff, #1976d2 55%, #0d47a1'},
   {id: 'yellow', name: 'きいろい', ink: '#ffdf24', gradient: '#fff9ae, #ffdf24 55%, #e6a800'},
+  {id: 'cyan', name: 'シアンの', ink: '#00d9e8', gradient: '#adffff, #00e5ed 55%, #008eaa'},
+  {id: 'magenta', name: 'マゼンタの', ink: '#e600dc', gradient: '#ffaeff, #ed00dc 55%, #95008d'},
   {id: 'white', name: 'しろい', ink: '#ffffff', gradient: '#ffffff, #f5f5f5 55%, #bdbdbd'},
   {id: 'black', name: 'くろい', ink: '#171717', gradient: '#666666, #222222 55%, #000000'},
 ];
@@ -529,8 +532,10 @@ function wrongBall(b) {
   playFeedback(() => {
     const ac = getAudio();
     // スマートフォンでも聞こえやすい倍音を含む、短い2回のブザー。
-    playTone(260, 'square', 0.22, ac.currentTime + 0.005, 0.24);
-    playTone(220, 'square', 0.28, ac.currentTime + 0.29, 0.24);
+    playTone(260, 'sawtooth', 0.24, ac.currentTime + 0.005, 0.32);
+    playTone(130, 'square', 0.24, ac.currentTime + 0.005, 0.18);
+    playTone(220, 'sawtooth', 0.32, ac.currentTime + 0.31, 0.32);
+    playTone(110, 'square', 0.32, ac.currentTime + 0.31, 0.18);
   });
   showColorHint(true);
   clearTimeout(feedbackTimer);
@@ -695,7 +700,7 @@ function endSplit() {
   clearInterval(rollTickInterval);
   state = STATE.CATCH;
   doFlash();
-  playFeedback(() => { playFanfare(); playApplause(); });
+  playFeedback(() => { playFanfare(); playApplause(); playCheering(); });
   launchConfetti();
   showClearText();
   setTimeout(() => { playApplause(); playCheering(); }, 500);
@@ -714,7 +719,7 @@ function catchBall(x, y) {
   ball.className = 'caught';
   doFlash();
   spawnRipple(x, y, 'rgba(255,220,0,0.7)');
-  playFeedback(() => { playFanfare(); playApplause(); });
+  playFeedback(() => { playFanfare(); playApplause(); playCheering(); });
   launchConfetti();
   showClearText();
 
@@ -745,11 +750,55 @@ function onTap(clientX, clientY) {
   }
 }
 
-// Pointer Eventsでタッチとマウスを統一し、二重入力を防ぐ。
+// 押している途中で2本目が触れたら、全ての指を離すまでグループ全体を無効にする。
+const heldPointers = new Set();
+let press = null;
+let invalidPress = false;
+function choiceAt(x, y) {
+  const radius = parseFloat(ball.style.width) / 2 * 1.12;
+  if (Math.hypot(x - ballX, y - ballY) <= radius) return ball;
+  return [...dummyBalls].reverse().find(b => Math.hypot(x - b.x, y - b.y) <= radius) || null;
+}
 gameEl.addEventListener('pointerdown', e => {
   e.preventDefault();
   warmupAudio();
-  onTap(e.clientX, e.clientY);
+  heldPointers.add(e.pointerId);
+  if (heldPointers.size !== 1 || e.isPrimary === false || (e.pointerType === 'mouse' && e.button !== 0)) {
+    invalidPress = true;
+    press = null;
+    return;
+  }
+  if (invalidPress || state !== STATE.RUN) return;
+  press = {id: e.pointerId, x: e.clientX, y: e.clientY,
+    choice: choiceAt(e.clientX, e.clientY), round: roundBallCount};
+  gameEl.setPointerCapture?.(e.pointerId);
+});
+window.addEventListener('pointermove', e => {
+  if (press && e.pointerId === press.id && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 30) {
+    invalidPress = true;
+  }
+});
+function finishPress(e, cancelled = false) {
+  if (!heldPointers.has(e.pointerId)) return;
+  const selected = press;
+  const valid = !cancelled && !invalidPress && heldPointers.size === 1 &&
+    selected && selected.id === e.pointerId && selected.round === roundBallCount && state === STATE.RUN &&
+    Math.hypot(e.clientX - selected.x, e.clientY - selected.y) <= 30;
+  heldPointers.delete(e.pointerId);
+  if (cancelled) invalidPress = true;
+  press = null;
+  if (valid && selected.choice) {
+    if (selected.choice === ball) onTap(ballX, ballY);
+    else if (dummyBalls.includes(selected.choice)) wrongBall(selected.choice);
+  }
+  if (heldPointers.size === 0) invalidPress = false;
+}
+window.addEventListener('pointerup', e => finishPress(e));
+window.addEventListener('pointercancel', e => finishPress(e, true));
+window.addEventListener('blur', () => {
+  heldPointers.clear();
+  press = null;
+  invalidPress = false;
 });
 
 // Safariで音声の許可が成立するtouchend/pointerupでも起動を試す。
