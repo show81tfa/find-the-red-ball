@@ -422,7 +422,7 @@ const CHOICE_COLORS = [
   {id: 'black', name: 'くろい', ink: '#171717', gradient: '#666666, #222222 55%, #000000'},
 ];
 let targetColorIndex = 0;
-let roundBallCount = 5;
+let roundBallCount = 2;
 function showColorHint(retry = false) {
   const target = CHOICE_COLORS[targetColorIndex];
   hintText.innerHTML = '<span class="target-color" style="color:' + target.ink + '">' + target.name + ' ボール</span>' + (retry ? 'を さがそう' : 'は どれかな？');
